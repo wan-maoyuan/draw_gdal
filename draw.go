@@ -25,12 +25,12 @@ func DefaultColorFunc(img *image.RGBA, x, y int, value float64) {
 	var colorValue = uint8(value)
 
 	img.SetRGBA(x, y, color.RGBA{
-		colorValue, 0, 0, colorValue,
+		colorValue, colorValue, colorValue, 255,
 	})
 }
 
 func Draw3857(data *Data, colorFunc ColorFunc) error {
-	if err := checkData(data); err != nil {
+	if err := data.check(); err != nil {
 		return err
 	}
 
@@ -68,8 +68,52 @@ func Draw3857(data *Data, colorFunc ColorFunc) error {
 }
 
 func convert3857To4326(x, y float64) (lat, lon float64) {
-	lon = x * 180.0 / 20037508.34
-	lat = math.Atan(math.Exp(y*math.Pi/20037508.34))*360.0/math.Pi - 90.0
+	lon = x * 180.0 / MaxValue
+	lat = math.Atan(math.Exp(y*math.Pi/MaxValue))*360.0/math.Pi - 90.0
 
 	return
+}
+
+func convert4326To3857(lat, lon float64) (x, y float64) {
+	x = lon * MaxValue / 180
+	y = math.Log(math.Tan((90+lat)*math.Pi/360)) / (math.Pi / 180)
+	y = y * MaxValue / 180
+
+	return
+}
+
+func DrawIrregular3857(data *IrregularData, colorFunc ColorFunc) error {
+	if err := data.check(); err != nil {
+		return err
+	}
+
+	img := image.NewRGBA(image.Rect(0, 0, 2049, 2049))
+	for index := 0; index < len(data.LatList); index++ {
+		lat := data.LatList[index]
+		lon := data.LonList[index]
+		x, y := convert4326To3857(lat, lon)
+
+		xIndex := int((x - MinValue) / StepValue)
+		yIndex := 2049 - int((y-MinValue)/StepValue)
+
+		value := data.ValueList[index]
+		colorFunc(img, xIndex, yIndex, value)
+	}
+
+	file, err := os.Create(data.OutFilePath)
+	if err != nil {
+		return fmt.Errorf("create out file: %s error: %v", data.OutFilePath, err)
+	}
+	defer file.Close()
+
+	fileWriter := bufio.NewWriter(file)
+	if err := png.Encode(fileWriter, img); err != nil {
+		return fmt.Errorf("png encode data to file error: %v", err)
+	}
+
+	if err := fileWriter.Flush(); err != nil {
+		return fmt.Errorf("flush data to out file error: %v", err)
+	}
+
+	return nil
 }
